@@ -41,10 +41,6 @@ HAL_StatusTypeDef CAN_TRANSMIT(CAN_HandleTypeDef *hcan, uint32_t id, uint8_t *da
 
 void CAN_Process_Incoming(uint32_t id, uint8_t *data, uint8_t len) {
 	switch (id) {
-		case CAN_DEFAULT_ID:
-		// Handle specific logic for CAN_DEFAULT_ID here
-			break;
-
 		// Default
 		default:
 			// Log unknown IDs for debugging

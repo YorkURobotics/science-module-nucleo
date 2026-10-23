@@ -15,7 +15,14 @@
 // Configuration (Define all CAN_IDs here)
 // -----------------------------------------------------------------------
 
-#define CAN_DEFAULT_ID 0x0E110C00        // Kratos Default ID
+// IDs that ROS already decodes (Rover-Team-Codebase configs/can_id_catalog.json)
+#define CAN_TEMPHUMID_ID  0x0D110000  // soil temperature/humidity
+#define CAN_PHCOND_ID     0x0D110400  // soil pH/conductivity
+#define CAN_NPK_ID        0x0D110800  // soil NPK
+#define CAN_CO2_ID        0x0D110C00  // CO2
+
+// Placeholders until IDs are assigned (no other node uses these values)
+#define CAN_H2_SENSOR_ID  0x0F110040
 
 // -----------------------------------------------------------------------
 // Function Prototypes
