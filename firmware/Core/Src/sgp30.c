@@ -292,9 +292,9 @@ HAL_StatusTypeDef sgp30_get_baseline(sgp30_t *dev, sgp30_baseline_t *out)
         out->co2eq_baseline = words[0];
         out->tvoc_baseline  = words[1];
 
-        /* Both-zero means the sensor has not stabilised (~60 min after
-         * init). Reject — persisting a zero baseline would degrade
-         * accuracy on the next restore. */
+        /* Reject an all-zero baseline rather than return it for storing.
+         * Without a restored baseline, the sensor must run 12 hours before
+         * the first baseline is stored (driver integration guide, p. 3). */
         if (out->co2eq_baseline == 0u && out->tvoc_baseline == 0u) {
             status = HAL_ERROR;
         }

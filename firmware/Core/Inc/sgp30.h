@@ -19,8 +19,8 @@
  *         // use r.co2eq_ppm, r.tvoc_ppb
  *     }
  *
- * Read no faster than 1 Hz — the sensor's dynamic-baseline algorithm
- * assumes that cadence and produces drift otherwise.
+ * Read exactly once per second: the datasheet requires measure_iaq "in
+ * regular intervals of 1s" for its dynamic baseline compensation (p. 9).
  *
  * Blocking durations (longest single call is the self-test at ~220 ms):
  *     init             ~10 ms       self_test       ~220 ms
@@ -113,9 +113,9 @@ HAL_StatusTypeDef sgp30_init(sgp30_t *dev, I2C_HandleTypeDef *hi2c);
 HAL_StatusTypeDef sgp30_read_iaq(sgp30_t *dev, sgp30_iaq_t *out);
 
 /* Run the sensor's on-chip self-test. Use during hardware bring-up only.
- * Do NOT call during the 15 s warm-up after sgp30_init — mixing self-test
- * with measurement mode requires a save/restore sequence the driver
- * does not implement. Returns HAL_ERROR if the self-test pattern does
+ * Do NOT call after sgp30_init: the datasheet says measure_test "should not
+ * be used after having issued an sgp30_iaq_init command" (p. 11, note 10).
+ * Returns HAL_ERROR if the self-test pattern does
  * not match 0xD400, otherwise propagates the HAL transport status. */
 HAL_StatusTypeDef sgp30_self_test(sgp30_t *dev);
 
@@ -129,8 +129,9 @@ HAL_StatusTypeDef sgp30_read_raw(sgp30_t *dev, sgp30_raw_t *out);
 HAL_StatusTypeDef sgp30_get_serial_id(sgp30_t *dev, uint64_t *serial_id);
 
 /* Read the current dynamic-baseline values. Returns HAL_ERROR if both
- * are zero (sensor not yet stabilised — retry periodically; baselines
- * become valid ~60 min after init). Persistence pattern: save once per
+ * are zero. Without a restored baseline, the sensor must run 12 hours
+ * before the first baseline is stored (Sensirion driver integration guide,
+ * p. 3). Persistence pattern: save once per
  * hour to non-volatile storage and at clean shutdown; restore via
  * sgp30_set_baseline at the next boot, BEFORE any read_iaq calls. */
 HAL_StatusTypeDef sgp30_get_baseline(sgp30_t *dev, sgp30_baseline_t *out);
