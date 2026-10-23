@@ -19,7 +19,8 @@
 #define ADC_REF_VOLTAGE 3.3f
 
 /*
- * Voltage divider config
+ * Voltage divider config: R1 in series from the sensor output to the ADC pin,
+ * R2 from the ADC pin to GND
  */
 #define DIVIDER_R1 2000.0f
 #define DIVIDER_R2 3000.0f

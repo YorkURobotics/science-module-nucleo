@@ -14,7 +14,8 @@
 static float convert_adc_to_sensor_voltage(uint16_t adc_value) {
   float adc_voltage = ((float)adc_value / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
 
-  return adc_voltage * ( DIVIDER_R2 / (DIVIDER_R1 + DIVIDER_R2));
+  /* The divider gives V_pin = V_sensor * R2 / (R1 + R2), so V_sensor = V_pin * (R1 + R2) / R2 */
+  return adc_voltage * ((DIVIDER_R1 + DIVIDER_R2) / DIVIDER_R2);
 }
 
 static uint16_t convert_voltage_to_millivolts(float voltage) {
