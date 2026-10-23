@@ -119,6 +119,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   LOG_INIT(&huart2);
 
 
@@ -599,13 +600,26 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	CAN_RxHeaderTypeDef rxHeader;
-	uint8_t rxData[8];
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr){
+	  CAN_RxHeaderTypeDef rxHeader;
+	  uint8_t rxData[8];
 
-	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK) {
-		CAN_Process_Incoming(rxHeader.ExtId, rxData, rxHeader.DLC);
-	}
+	  if (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK)
+	  {
+	    uint32_t id;
+
+	    if (rxHeader.IDE == CAN_ID_EXT)
+	    {
+	      id = rxHeader.ExtId;
+	    }
+	    else
+	    {
+	      id = rxHeader.StdId;
+	    }
+
+	    CAN_Process_Incoming(id, rxData, rxHeader.DLC);
+	  }
+
 }
 /* USER CODE END 4 */
 
