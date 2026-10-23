@@ -76,6 +76,17 @@ static Soil_Status SendRecv(UART_HandleTypeDef *huart,
  * Public functions
  * ------------------------------------------------------------------------- */
 
+/* Limit a reading to the sensor's measuring range [lo, hi] */
+static float clamp_f(float v, float lo, float hi)
+{
+    return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+static uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi)
+{
+    return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
 /**
  * @brief Read humidity, temperature, conductivity, pH, N, P, K
  *        Master sends:  01 03 00 00 00 07 04 08
@@ -99,6 +110,15 @@ Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data)
     data->nitrogen     =  (uint16_t)(resp[11] << 8) | resp[12];
     data->phosphorus   =  (uint16_t)(resp[13] << 8) | resp[14];
     data->potassium    =  (uint16_t)(resp[15] << 8) | resp[16];
+
+    /* Measuring ranges from the soil sensor manual (TH-EC-PH-NPK, p. 1) */
+    data->humidity     = clamp_f(data->humidity, 0.0f, 100.0f);         /* %RH   */
+    data->temperature  = clamp_f(data->temperature, -40.0f, 80.0f);     /* deg C */
+    data->conductivity = clamp_u16(data->conductivity, 0, 20000);       /* uS/cm */
+    data->ph           = clamp_f(data->ph, 3.0f, 9.0f);
+    data->nitrogen     = clamp_u16(data->nitrogen, 1, 2999);            /* mg/kg */
+    data->phosphorus   = clamp_u16(data->phosphorus, 1, 2999);          /* mg/kg */
+    data->potassium    = clamp_u16(data->potassium, 1, 2999);           /* mg/kg */
 
     return SOIL_OK;
 }
