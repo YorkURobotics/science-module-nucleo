@@ -79,19 +79,19 @@ Soil_Status Soil_SetBaudRate(UART_HandleTypeDef *huart, uint8_t rate);
 
 /**
  * @brief Write a nitrogen value into the sensor register
- *        Modbus: 0x01 0x06 0x00 0x04 0x00 <value> CRC CRC
+ *        Modbus: 0x01 0x06 0x00 0x04 <value high byte> <value low byte> CRC CRC
  */
 Soil_Status Soil_WriteNitrogen(UART_HandleTypeDef *huart, uint16_t value);
 
 /**
  * @brief Write a phosphorus value into the sensor register
- *        Modbus: 0x01 0x06 0x00 0x05 0x00 <value> CRC CRC
+ *        Modbus: 0x01 0x06 0x00 0x05 <value high byte> <value low byte> CRC CRC
  */
 Soil_Status Soil_WritePhosphorus(UART_HandleTypeDef *huart, uint16_t value);
 
 /**
  * @brief Write a potassium value into the sensor register
- *        Modbus: 0x01 0x06 0x00 0x06 0x00 <value> CRC CRC
+ *        Modbus: 0x01 0x06 0x00 0x06 <value high byte> <value low byte> CRC CRC
  */
 Soil_Status Soil_WritePotassium(UART_HandleTypeDef *huart, uint16_t value);
 
