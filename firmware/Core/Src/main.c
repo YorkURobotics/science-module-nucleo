@@ -21,6 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "sgp30.h"
+#include "h2_sensor_driver.h"
+#include "soil_sensor.h"
 #include "can_handler.h"
 #include "logger.h"
 
@@ -48,6 +51,8 @@ CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c2;
 
+IWDG_HandleTypeDef hiwdg;
+
 TIM_HandleTypeDef htim1;
 
 UART_HandleTypeDef huart1;
@@ -66,6 +71,7 @@ static void MX_ADC1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -110,6 +116,7 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM1_Init();
   MX_USART1_UART_Init();
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   LOG_INIT(&huart2);
 
@@ -118,6 +125,18 @@ int main(void)
   CAN_CONFIG(&hcan);
   HAL_CAN_Start(&hcan);
   HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
+
+  __HAL_DBGMCU_FREEZE_IWDG();       /* the watchdog pauses while a debugger halts the core */
+
+  sgp30_t sgp30;
+  sgp30_init(&sgp30, &hi2c2);
+  uint32_t co2_start = HAL_GetTick(); /* the SGP30 reports fixed values for 15 s after init */
+
+  H2_Sensor h2;
+  h2_sensor_init(&h2, &hadc1);
+
+  uint32_t last_second = HAL_GetTick();
+  uint8_t soil_skip = 0;
 
   LOG_INFO("All initializations complete!");
   /* USER CODE END 2 */
@@ -129,6 +148,35 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    HAL_IWDG_Refresh(&hiwdg);
+
+    if (HAL_GetTick() - last_second >= 1000) {   /* the SGP30 must be read every 1 s */
+      last_second = HAL_GetTick();             /* restart the second; a slow pass must not cause a catch-up burst */
+
+      sgp30_iaq_t r;
+      if (sgp30_read_iaq(&sgp30, &r) == HAL_OK && HAL_GetTick() - co2_start >= 15000) {
+        uint8_t data[4] = { r.co2eq_ppm >> 8, r.co2eq_ppm & 0xFF, r.tvoc_ppb >> 8, r.tvoc_ppb & 0xFF };
+        CAN_TRANSMIT(&hcan, CAN_CO2_ID, data, 4);
+      }
+
+      if (read_ADC(&h2) == HAL_OK) {
+        transmit_h2_sensor_values(&hcan, &h2);
+      }
+
+      /* One soil sample per second: Soil_ReadAvg() would block for 5 s or more. After a failed read, soil is
+         skipped for the next 9 passes, so a missing sensor costs one 2 s receive timeout every 10 passes
+         (about 11 s). */
+      if (soil_skip > 0) {
+        soil_skip--;
+      } else {
+        Soil_Data soil;
+        if (Soil_ReadAll(&huart1, &soil) == SOIL_OK) {
+          Soil_CAN_Transmit(&hcan, &soil);
+        } else {
+          soil_skip = 9;
+        }
+      }
+    }
   }
   /* USER CODE END 3 */
 }
@@ -146,11 +194,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI
+                              |RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -324,6 +374,35 @@ static void MX_I2C2_Init(void)
   /* USER CODE BEGIN I2C2_Init 2 */
 
   /* USER CODE END I2C2_Init 2 */
+
+}
+
+/**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_128;
+  hiwdg.Init.Window = 4095;
+  hiwdg.Init.Reload = 2500;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
 
 }
 
