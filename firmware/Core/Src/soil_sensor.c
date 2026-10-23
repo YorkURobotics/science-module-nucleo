@@ -134,12 +134,16 @@ Soil_Status Soil_ReadAvg(UART_HandleTypeDef *huart, Soil_Data *data)
 
 	    Soil_Data samples[10] = {0};
 	    uint8_t validSamples = 0;
+	    bool valid[10] = { false };   /* which of the samples below were read successfully */
 
 	    // Collect 10 samples
 	    for (int i = 0; i < 10; i++)
 	    {
 	        if (Soil_ReadAll(huart, &samples[i]) == SOIL_OK)
+	        {
+	            valid[i] = true;
 	            validSamples++;
+	        }
 
 	        HAL_Delay(500);
 	    }
@@ -157,7 +161,7 @@ Soil_Status Soil_ReadAvg(UART_HandleTypeDef *huart, Soil_Data *data)
 
 	    for (int i = 0; i < 10; i++)
 	    {
-	        if (Soil_ReadAll(huart, &samples[i]) == SOIL_OK)
+	        if (valid[i])   /* sum the samples read above; reading again could change validSamples */
 	        {
 	            sumHumidity     += samples[i].humidity;
 	            sumTemperature  += samples[i].temperature;
