@@ -23,6 +23,7 @@
 
 // Placeholders until IDs are assigned (no other node uses these values)
 #define CAN_H2_SENSOR_ID  0x0F110040
+#define CAN_WEIGHT_ID     0x0F110080
 
 // -----------------------------------------------------------------------
 // Function Prototypes

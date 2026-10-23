@@ -24,6 +24,7 @@
 #include "sgp30.h"
 #include "h2_sensor_driver.h"
 #include "soil_sensor.h"
+#include "weight_cell.h"
 #include "can_handler.h"
 #include "logger.h"
 
@@ -176,6 +177,8 @@ int main(void)
           soil_skip = 9;
         }
       }
+
+      /* weight cell: read and transmit (weight-cell pull request) */
     }
   }
   /* USER CODE END 3 */
