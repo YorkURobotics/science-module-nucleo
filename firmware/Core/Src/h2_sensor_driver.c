@@ -43,7 +43,8 @@ HAL_StatusTypeDef h2_sensor_init(H2_Sensor *sensor, ADC_HandleTypeDef *hadc) {
   sensor->adc_raw = 0;
   sensor->sensor_voltage = 0.0f;
 
-  return HAL_OK;
+  /* Calibrate before the first conversion: removes the ADC's offset error (RM0365 15.3.8) */
+  return HAL_ADCEx_Calibration_Start(hadc, ADC_SINGLE_ENDED);
 }
 
 /*
