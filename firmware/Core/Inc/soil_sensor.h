@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    SOIL_SENSOR.h
- * @brief   Driver for NHK RS485 Modbus Soil Sensor
+ * @brief   Driver for the Halisense RS485 Modbus soil sensor
  *
  * @note    UART config: 4800 baud, 8N1
  *          Default slave ID: 0x01

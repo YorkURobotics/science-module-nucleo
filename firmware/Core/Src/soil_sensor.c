@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    SOIL_SENSOR.c
- * @brief   Driver implementation for NHK RS485 Modbus Soil Sensor
+ * @brief   Driver implementation for the Halisense RS485 Modbus soil sensor
  ******************************************************************************
  */
 
