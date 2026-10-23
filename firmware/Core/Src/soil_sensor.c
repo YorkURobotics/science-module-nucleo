@@ -310,10 +310,11 @@ void Soil_FormatData(const Soil_Data *data, char *buf, uint16_t buflen)
     int hum_scaled  = (int)(data->humidity    * 10.0f + 0.5f);
     int ph_scaled   = (int)(data->ph          * 10.0f + 0.5f);
 
-    /* 2. Format as whole.fraction (%d.%d) using standard integer printf */
+    /* 2. Format as whole.fraction (%d.%d) using standard integer printf. The temperature's
+          sign is printed separately: for -0.5, temp_scaled / 10 is 0 and would lose it. */
     snprintf(buf, buflen,
-            "Temp: %d.%d C | Hum: %d.%d %% | pH: %d.%d | EC: %u us/cm | NPK: %u,%u,%u mg/kg\r\n",
-            temp_scaled / 10, abs(temp_scaled % 10),
+            "Temp: %s%d.%d C | Hum: %d.%d %% | pH: %d.%d | EC: %u us/cm | NPK: %u,%u,%u mg/kg\r\n",
+            (temp_scaled < 0) ? "-" : "", abs(temp_scaled) / 10, abs(temp_scaled) % 10,
             hum_scaled  / 10, abs(hum_scaled  % 10),
             ph_scaled   / 10, abs(ph_scaled   % 10),
             data->conductivity,
