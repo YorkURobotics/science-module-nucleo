@@ -7,7 +7,7 @@
 #include "weigh.h"
 #include "hx711.h"
 
-int32_t tare = 8388582;
+int32_t tare = -26;   /* was 8388582 (0x7FFFE6): the same zero in the offset-binary format hx711.c used before weight-cell 9f01201 */
 /*
  * self explanatory
  */
