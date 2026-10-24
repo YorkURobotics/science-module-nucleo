@@ -21,6 +21,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "sgp30.h"
+#include "h2_sensor_driver.h"
+#include "soil_sensor.h"
+#include "hx711.h"
+#include "weigh.h"
 #include "can_handler.h"
 #include "logger.h"
 
@@ -48,13 +53,17 @@ CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c2;
 
+IWDG_HandleTypeDef hiwdg;
+
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+volatile uint8_t weighRequest = 0;   /* set by CAN_Process_Incoming() (can_handler.c) */
+volatile uint8_t tareRequest = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,6 +75,8 @@ static void MX_ADC1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_IWDG_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -110,14 +121,50 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM1_Init();
   MX_USART1_UART_Init();
+  MX_IWDG_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) {
+    Error_Handler();
+  }
   LOG_INIT(&huart2);
 
 
 
-  CAN_CONFIG(&hcan);
-  HAL_CAN_Start(&hcan);
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
+  if (CAN_CONFIG(&hcan) != HAL_OK) {
+    Error_Handler();
+  }
+  if (HAL_CAN_Start(&hcan) != HAL_OK) {
+    Error_Handler();
+  }
+  if (HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING) != HAL_OK) {
+    Error_Handler();
+  }
+
+  __HAL_DBGMCU_FREEZE_IWDG();       /* the watchdog pauses while a debugger halts the core */
+
+  /* A sensor that fails to start is logged, not fatal: the loop sends only successful reads, and the
+     other sensors keep running. */
+  sgp30_t sgp30;
+  if (sgp30_init(&sgp30, &hi2c2) != HAL_OK) {
+    LOG_ERROR("SGP30 init failed");
+  }
+  uint32_t co2_start = HAL_GetTick(); /* the SGP30 reports fixed values for 15 s after init */
+
+  H2_Sensor h2;
+  if (h2_sensor_init(&h2, &hadc1) != HAL_OK) {
+    LOG_ERROR("H2 sensor init failed");
+  }
+
+  uint32_t last_second = HAL_GetTick();
+
+  if (HAL_TIM_Base_Start(&htim2) != HAL_OK) {   /* 1 MHz counter for the HX711 clock pulses (hx711.c) */
+    Error_Handler();
+  }
+  HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_SET);     /* reset the HX711: clock high for over 60 us, */
+  HAL_Delay(10);
+  HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_RESET);   /* then low (HX711 datasheet, p. 5) */
+  HAL_Delay(10);
 
   LOG_INFO("All initializations complete!");
   /* USER CODE END 2 */
@@ -129,6 +176,52 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    HAL_IWDG_Refresh(&hiwdg);
+
+    /* Weigh and tare run when CAN_WEIGHT_CELL_ID asks for them (can_handler.c). Each takes 50 HX711 samples:
+       about 5 s at 10 samples/s, and at most about 10 s if the HX711 never signals ready (200 ms timeout
+       per sample in hx711.c). The watchdog is refreshed after each; its shortest timeout (12.8 s) is longer. */
+    if (tareRequest == 1) {
+      tare_request(&htim2);
+      tareRequest = 0;
+      HAL_IWDG_Refresh(&hiwdg);
+    }
+    if (weighRequest == 1) {
+      int weight = weigh(&htim2);   /* milligrams */
+      weighRequest = 0;
+      weight = weight * 0.95;       /* scaled as in the weight-cell repository's main.c */
+      if (CAN_TRANSMIT(&hcan, CAN_WEIGHT_CELL_ID, (uint8_t *) &weight, 4) != HAL_OK) {
+        LOG_ERROR("weight CAN send failed");
+      }
+      HAL_IWDG_Refresh(&hiwdg);
+    }
+
+    if (HAL_GetTick() - last_second >= 1000) {   /* the SGP30 must be read every 1 s */
+      last_second = HAL_GetTick();             /* restart the second; a slow pass must not cause a catch-up burst */
+
+      sgp30_iaq_t r;
+      if (sgp30_read_iaq(&sgp30, &r) == HAL_OK && HAL_GetTick() - co2_start >= 15000) {
+        uint8_t data[4] = { r.co2eq_ppm >> 8, r.co2eq_ppm & 0xFF, r.tvoc_ppb >> 8, r.tvoc_ppb & 0xFF };
+        if (CAN_TRANSMIT(&hcan, CAN_CO2_ID, data, 4) != HAL_OK) {
+          LOG_ERROR("CO2 CAN send failed");
+        }
+      }
+
+      if (read_ADC(&h2) == HAL_OK) {
+        if (transmit_h2_sensor_values(&hcan, &h2) != HAL_OK) {
+          LOG_ERROR("H2 CAN send failed");
+        }
+      }
+
+      /* One soil request per second. The reply arrives by interrupt and is collected below, so a slow
+         or missing sensor no longer delays the SGP30 read (sending the request takes about 27 ms). */
+      Soil_StartReadAll(&huart1);
+    }
+
+    Soil_Data soil;
+    if (Soil_PollReadAll(&soil) == SOIL_OK && Soil_CAN_Transmit(&hcan, &soil) != HAL_OK) {
+      LOG_ERROR("soil CAN send failed");
+    }
   }
   /* USER CODE END 3 */
 }
@@ -146,11 +239,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI
+                              |RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -229,7 +324,7 @@ static void MX_ADC1_Init(void)
   sConfig.Channel = ADC_CHANNEL_5;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_601CYCLES_5;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -328,6 +423,35 @@ static void MX_I2C2_Init(void)
 }
 
 /**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
+  hiwdg.Init.Window = 4095;
+  hiwdg.Init.Reload = 2500;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
+
+}
+
+/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -398,6 +522,51 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 2 */
   HAL_TIM_MspPostInit(&htim1);
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 72-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -517,13 +686,27 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	CAN_RxHeaderTypeDef rxHeader;
-	uint8_t rxData[8];
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr){
+	  CAN_RxHeaderTypeDef rxHeader;
+	  uint8_t rxData[8];
 
-	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK) {
-		CAN_Process_Incoming(rxHeader.ExtId, rxData, rxHeader.DLC);
-	}
+	  /* Data frames only: a remote (RTR) frame has no data field (RM0365 Figure 392), so rxData would not hold frame data */
+	  if (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK && rxHeader.RTR == CAN_RTR_DATA)
+	  {
+	    uint32_t id;
+
+	    if (rxHeader.IDE == CAN_ID_EXT)
+	    {
+	      id = rxHeader.ExtId;
+	    }
+	    else
+	    {
+	      id = rxHeader.StdId;
+	    }
+
+	    CAN_Process_Incoming(id, rxData, rxHeader.DLC);
+	  }
+
 }
 /* USER CODE END 4 */
 

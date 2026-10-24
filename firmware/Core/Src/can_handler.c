@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include "can_handler.h"
+#include "pump_driver.h"
+#include "weigh.h"
 
 HAL_StatusTypeDef CAN_CONFIG(CAN_HandleTypeDef *hcan) {
 	CAN_FilterTypeDef sFilterConfig;
@@ -41,9 +43,32 @@ HAL_StatusTypeDef CAN_TRANSMIT(CAN_HandleTypeDef *hcan, uint32_t id, uint8_t *da
 
 void CAN_Process_Incoming(uint32_t id, uint8_t *data, uint8_t len) {
 	switch (id) {
-		case CAN_DEFAULT_ID:
-		// Handle specific logic for CAN_DEFAULT_ID here
+		case CAN_PUMP_ID:
+
+      if (len < 2 || data == NULL){
+        return;    
+      }
+
+      //assemble the speed from payload
+      uint16_t speed = 0; 
+      speed = data[0];
+      speed |= data[1] << 8;
+
+      //set speed
+      Pump_SetSpeed(speed);
 			break;
+
+	case CAN_WEIGHT_CELL_ID:   // from the weight-cell repository's can_handler.c
+		if (data == NULL || len <= 0) {
+			break;
+		}
+		if (data[0] == 0) {
+			tareRequest = 1;
+			}
+		else if (data[0] == 1){
+			weighRequest = 1;
+		}
+		break;
 
 		// Default
 		default:
