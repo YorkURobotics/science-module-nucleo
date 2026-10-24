@@ -124,28 +124,44 @@ int main(void)
   MX_IWDG_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) {
+    Error_Handler();
+  }
   LOG_INIT(&huart2);
 
 
 
-  CAN_CONFIG(&hcan);
-  HAL_CAN_Start(&hcan);
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
+  if (CAN_CONFIG(&hcan) != HAL_OK) {
+    Error_Handler();
+  }
+  if (HAL_CAN_Start(&hcan) != HAL_OK) {
+    Error_Handler();
+  }
+  if (HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING) != HAL_OK) {
+    Error_Handler();
+  }
 
   __HAL_DBGMCU_FREEZE_IWDG();       /* the watchdog pauses while a debugger halts the core */
 
+  /* A sensor that fails to start is logged, not fatal: the loop sends only successful reads, and the
+     other sensors keep running. */
   sgp30_t sgp30;
-  sgp30_init(&sgp30, &hi2c2);
+  if (sgp30_init(&sgp30, &hi2c2) != HAL_OK) {
+    LOG_ERROR("SGP30 init failed");
+  }
   uint32_t co2_start = HAL_GetTick(); /* the SGP30 reports fixed values for 15 s after init */
 
   H2_Sensor h2;
-  h2_sensor_init(&h2, &hadc1);
+  if (h2_sensor_init(&h2, &hadc1) != HAL_OK) {
+    LOG_ERROR("H2 sensor init failed");
+  }
 
   uint32_t last_second = HAL_GetTick();
   uint8_t soil_skip = 0;
 
-  HAL_TIM_Base_Start(&htim2);   /* 1 MHz counter for the HX711 clock pulses (hx711.c) */
+  if (HAL_TIM_Base_Start(&htim2) != HAL_OK) {   /* 1 MHz counter for the HX711 clock pulses (hx711.c) */
+    Error_Handler();
+  }
   HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_SET);     /* reset the HX711: clock high for over 60 us, */
   HAL_Delay(10);
   HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_RESET);   /* then low (HX711 datasheet, p. 5) */
