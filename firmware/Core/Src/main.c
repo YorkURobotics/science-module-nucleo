@@ -690,7 +690,8 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr){
 	  CAN_RxHeaderTypeDef rxHeader;
 	  uint8_t rxData[8];
 
-	  if (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK)
+	  /* Data frames only: a remote (RTR) frame has no data field (RM0365 Figure 392), so rxData would not hold frame data */
+	  if (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO1, &rxHeader, rxData) == HAL_OK && rxHeader.RTR == CAN_RTR_DATA)
 	  {
 	    uint32_t id;
 
