@@ -38,6 +38,4 @@ HAL_StatusTypeDef CAN_TRANSMIT(CAN_HandleTypeDef * hcan, uint32_t id, uint8_t *d
 
 void CAN_Process_Incoming(uint32_t id, uint8_t *data, uint8_t len);
 
-void CAN_Send_Pump_Data(CAN_HandleTypeDef *hcan, uint16_t pump_speed);
-
 #endif /* CAN_HANDLER_H */
