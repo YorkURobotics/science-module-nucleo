@@ -24,7 +24,8 @@
 #include "sgp30.h"
 #include "h2_sensor_driver.h"
 #include "soil_sensor.h"
-#include "weight_cell.h"
+#include "hx711.h"
+#include "weigh.h"
 #include "can_handler.h"
 #include "logger.h"
 
@@ -61,7 +62,8 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+volatile uint8_t weighRequest = 0;   /* set by CAN_Process_Incoming() (can_handler.c) */
+volatile uint8_t tareRequest = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -143,6 +145,12 @@ int main(void)
   uint32_t last_second = HAL_GetTick();
   uint8_t soil_skip = 0;
 
+  HAL_TIM_Base_Start(&htim2);   /* 1 MHz counter for the HX711 clock pulses (hx711.c) */
+  HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_SET);     /* reset the HX711: clock high for over 60 us, */
+  HAL_Delay(10);
+  HAL_GPIO_WritePin(SCK_PORT, SCK_PIN, GPIO_PIN_RESET);   /* then low (HX711 datasheet, p. 5) */
+  HAL_Delay(10);
+
   LOG_INFO("All initializations complete!");
   /* USER CODE END 2 */
 
@@ -154,6 +162,22 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     HAL_IWDG_Refresh(&hiwdg);
+
+    /* Weigh and tare run when CAN_WEIGHT_CELL_ID asks for them (can_handler.c). Each takes 50 HX711 samples:
+       about 5 s at 10 samples/s, and at most about 10 s if the HX711 never signals ready (200 ms timeout
+       per sample in hx711.c). The watchdog is refreshed after each; its shortest timeout (12.8 s) is longer. */
+    if (tareRequest == 1) {
+      tare_request(&htim2);
+      tareRequest = 0;
+      HAL_IWDG_Refresh(&hiwdg);
+    }
+    if (weighRequest == 1) {
+      int weight = weigh(&htim2);   /* milligrams */
+      weighRequest = 0;
+      weight = weight * 0.95;       /* scaled as in the weight-cell repository's main.c */
+      CAN_TRANSMIT(&hcan, CAN_WEIGHT_CELL_ID, (uint8_t *) &weight, 4);
+      HAL_IWDG_Refresh(&hiwdg);
+    }
 
     if (HAL_GetTick() - last_second >= 1000) {   /* the SGP30 must be read every 1 s */
       last_second = HAL_GetTick();             /* restart the second; a slow pass must not cause a catch-up burst */
@@ -181,8 +205,6 @@ int main(void)
           soil_skip = 9;
         }
       }
-
-      /* weight cell: read and transmit (weight-cell pull request) */
     }
   }
   /* USER CODE END 3 */

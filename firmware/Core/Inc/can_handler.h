@@ -23,8 +23,11 @@
 
 // Placeholders until IDs are assigned (no other node uses these values)
 #define CAN_H2_SENSOR_ID  0x0F110040
-#define CAN_WEIGHT_ID     0x0F110080
 #define CAN_PUMP_ID 0x0F110001 // TODO: Change ID
+
+// Weight cell, from the weight-cell repository (not yet in configs/can_id_catalog.json):
+// a received payload[0] of 0 tares and 1 weighs; the reply on the same ID is the weight, int32 mg, little-endian
+#define CAN_WEIGHT_CELL_ID 0x0D110C40
 
 // -----------------------------------------------------------------------
 // Function Prototypes
