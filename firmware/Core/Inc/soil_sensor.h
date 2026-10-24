@@ -28,6 +28,8 @@ typedef enum {
     SOIL_ERR_TX     = 1,
     SOIL_ERR_RX     = 2,
     SOIL_ERR_CRC    = 3,
+    SOIL_BUSY       = 4,   /* Soil_PollReadAll(): the reply is not complete yet */
+    SOIL_IDLE       = 5,   /* Soil_PollReadAll(): no request is outstanding */
 } Soil_Status;
 
 typedef struct {
@@ -49,6 +51,21 @@ typedef struct {
  *        Modbus: 0x01 0x03 0x00 0x00 0x00 0x07 CRC CRC
  */
 Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data);
+
+/**
+ * @brief Start the same read without waiting: send the request; the reply is received by the UART
+ *        interrupt (USART1 global interrupt enabled in CubeMX). Collect it with Soil_PollReadAll().
+ *        Do not call the blocking functions on the same UART while a request is outstanding.
+ * @retval SOIL_OK (request sent), SOIL_BUSY (a request is already outstanding), SOIL_ERR_TX, SOIL_ERR_RX
+ */
+Soil_Status Soil_StartReadAll(UART_HandleTypeDef *huart);
+
+/**
+ * @brief Collect the reply to Soil_StartReadAll(); call it on every loop pass
+ * @retval SOIL_OK (data filled), SOIL_BUSY (still waiting), SOIL_IDLE (no request outstanding),
+ *         SOIL_ERR_CRC, or SOIL_ERR_RX (receive overrun, or no complete reply within 2 s)
+ */
+Soil_Status Soil_PollReadAll(Soil_Data *data);
 
 /**
  * @brief Read all soil parameters averaged over 10 samples

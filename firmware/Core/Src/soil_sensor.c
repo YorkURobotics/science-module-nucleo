@@ -87,21 +87,9 @@ static uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi)
     return (v < lo) ? lo : (v > hi) ? hi : v;
 }
 
-/**
- * @brief Read humidity, temperature, conductivity, pH, N, P, K
- *        Master sends:  01 03 00 00 00 07 04 08
- *        Sensor responds: 01 03 0E [14 data bytes] CRC CRC
- */
-Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data)
+/* Fill data from a Read All reply */
+static void ParseReadAll(const uint8_t *resp, Soil_Data *data)
 {
-    if (huart == NULL || data == NULL) return SOIL_ERR_TX;
-
-    uint8_t msg[8]    = { SLAVE_ID, FC_READ, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00 };
-    uint8_t resp[19]  = { 0 };  /* 3 header + 14 data + 2 CRC */
-
-    Soil_Status status = SendRecv(huart, msg, sizeof(msg), resp, sizeof(resp));
-    if (status != SOIL_OK) return status;
-
     /* Parse — data starts at resp[3], each register is 2 bytes big-endian */
     data->humidity     = ((uint16_t)(resp[3]  << 8) | resp[4])  * 0.1f;
     data->temperature  = (int16_t) ((resp[5]  << 8) | resp[6])  * 0.1f;
@@ -119,8 +107,92 @@ Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data)
     data->nitrogen     = clamp_u16(data->nitrogen, 1, 2999);            /* mg/kg */
     data->phosphorus   = clamp_u16(data->phosphorus, 1, 2999);          /* mg/kg */
     data->potassium    = clamp_u16(data->potassium, 1, 2999);           /* mg/kg */
+}
 
+/**
+ * @brief Read humidity, temperature, conductivity, pH, N, P, K
+ *        Master sends:  01 03 00 00 00 07 04 08
+ *        Sensor responds: 01 03 0E [14 data bytes] CRC CRC
+ */
+Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data)
+{
+    if (huart == NULL || data == NULL) return SOIL_ERR_TX;
+
+    uint8_t msg[8]    = { SLAVE_ID, FC_READ, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00 };
+    uint8_t resp[19]  = { 0 };  /* 3 header + 14 data + 2 CRC */
+
+    Soil_Status status = SendRecv(huart, msg, sizeof(msg), resp, sizeof(resp));
+    if (status != SOIL_OK) return status;
+
+    ParseReadAll(resp, data);
     return SOIL_OK;
+}
+
+/* Non-blocking Read All: the reply is received by HAL_UART_Receive_IT() into rx_buf */
+static uint8_t rx_buf[19];                        /* 3 header + 14 data + 2 CRC */
+static volatile uint8_t rx_done;                  /* set by HAL_UART_RxCpltCallback() */
+static UART_HandleTypeDef * volatile rx_huart;    /* NULL when no request is outstanding */
+static uint32_t rx_start;
+
+Soil_Status Soil_StartReadAll(UART_HandleTypeDef *huart)
+{
+    if (huart == NULL) return SOIL_ERR_TX;
+    if (rx_huart != NULL) return SOIL_BUSY;
+
+    uint8_t msg[8] = { SLAVE_ID, FC_READ, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00 };
+    uint16_t crc = CRC16(msg, sizeof(msg) - 2);
+    msg[6] = crc & 0xFF;
+    msg[7] = (crc >> 8) & 0xFF;
+
+    /* Flush stale RX data */
+    __HAL_UART_FLUSH_DRREGISTER(huart);
+
+    if (HAL_UART_Transmit(huart, msg, sizeof(msg), TX_TIMEOUT) != HAL_OK)
+        return SOIL_ERR_TX;
+
+    HAL_Delay(BUS_TURNAROUND);
+
+    rx_done = 0;
+    rx_start = HAL_GetTick();
+    rx_huart = huart;
+    if (HAL_UART_Receive_IT(huart, rx_buf, sizeof(rx_buf)) != HAL_OK) {
+        rx_huart = NULL;
+        return SOIL_ERR_RX;
+    }
+    return SOIL_OK;
+}
+
+Soil_Status Soil_PollReadAll(Soil_Data *data)
+{
+    if (data == NULL) return SOIL_ERR_RX;
+    if (rx_huart == NULL) return SOIL_IDLE;
+
+    if (rx_done) {
+        rx_huart = NULL;
+        uint16_t recv_crc = ((uint16_t)rx_buf[sizeof(rx_buf) - 1] << 8) | rx_buf[sizeof(rx_buf) - 2];
+        if (CRC16(rx_buf, sizeof(rx_buf) - 2) != recv_crc) return SOIL_ERR_CRC;
+        ParseReadAll(rx_buf, data);
+        return SOIL_OK;
+    }
+
+    /* The HAL ends an interrupt reception early on an overrun (HAL_UART_IRQHandler) */
+    if (rx_huart->RxState == HAL_UART_STATE_READY) {
+        rx_huart = NULL;
+        return SOIL_ERR_RX;
+    }
+
+    if (HAL_GetTick() - rx_start > RX_TIMEOUT) {
+        HAL_UART_AbortReceive(rx_huart);
+        rx_huart = NULL;
+        return SOIL_ERR_RX;
+    }
+    return SOIL_BUSY;
+}
+
+/* Overrides the HAL's weak callback; runs in the UART interrupt when a reception completes */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == rx_huart) rx_done = 1;
 }
 
 /**
@@ -330,6 +402,8 @@ const char *Soil_StatusStr(Soil_Status status)
         case SOIL_ERR_TX:   return "TX Error";
         case SOIL_ERR_RX:   return "RX Timeout";
         case SOIL_ERR_CRC:  return "CRC Mismatch";
+        case SOIL_BUSY:     return "Busy";
+        case SOIL_IDLE:     return "Idle";
         default:            return "Unknown";
     }
 }

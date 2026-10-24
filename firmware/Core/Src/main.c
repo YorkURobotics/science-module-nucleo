@@ -157,7 +157,6 @@ int main(void)
   }
 
   uint32_t last_second = HAL_GetTick();
-  uint8_t soil_skip = 0;
 
   if (HAL_TIM_Base_Start(&htim2) != HAL_OK) {   /* 1 MHz counter for the HX711 clock pulses (hx711.c) */
     Error_Handler();
@@ -214,21 +213,14 @@ int main(void)
         }
       }
 
-      /* One soil sample per second: Soil_ReadAvg() would block for 5 s or more. After a failed read, soil is
-         skipped for the next 9 passes, so a missing sensor costs one 2 s receive timeout every 10 passes
-         (about 11 s). */
-      if (soil_skip > 0) {
-        soil_skip--;
-      } else {
-        Soil_Data soil;
-        if (Soil_ReadAll(&huart1, &soil) == SOIL_OK) {
-          if (Soil_CAN_Transmit(&hcan, &soil) != HAL_OK) {
-            LOG_ERROR("soil CAN send failed");
-          }
-        } else {
-          soil_skip = 9;
-        }
-      }
+      /* One soil request per second. The reply arrives by interrupt and is collected below, so a slow
+         or missing sensor no longer delays the SGP30 read (sending the request takes about 27 ms). */
+      Soil_StartReadAll(&huart1);
+    }
+
+    Soil_Data soil;
+    if (Soil_PollReadAll(&soil) == SOIL_OK && Soil_CAN_Transmit(&hcan, &soil) != HAL_OK) {
+      LOG_ERROR("soil CAN send failed");
     }
   }
   /* USER CODE END 3 */
