@@ -191,7 +191,9 @@ int main(void)
       int weight = weigh(&htim2);   /* milligrams */
       weighRequest = 0;
       weight = weight * 0.95;       /* scaled as in the weight-cell repository's main.c */
-      CAN_TRANSMIT(&hcan, CAN_WEIGHT_CELL_ID, (uint8_t *) &weight, 4);
+      if (CAN_TRANSMIT(&hcan, CAN_WEIGHT_CELL_ID, (uint8_t *) &weight, 4) != HAL_OK) {
+        LOG_ERROR("weight CAN send failed");
+      }
       HAL_IWDG_Refresh(&hiwdg);
     }
 
@@ -201,11 +203,15 @@ int main(void)
       sgp30_iaq_t r;
       if (sgp30_read_iaq(&sgp30, &r) == HAL_OK && HAL_GetTick() - co2_start >= 15000) {
         uint8_t data[4] = { r.co2eq_ppm >> 8, r.co2eq_ppm & 0xFF, r.tvoc_ppb >> 8, r.tvoc_ppb & 0xFF };
-        CAN_TRANSMIT(&hcan, CAN_CO2_ID, data, 4);
+        if (CAN_TRANSMIT(&hcan, CAN_CO2_ID, data, 4) != HAL_OK) {
+          LOG_ERROR("CO2 CAN send failed");
+        }
       }
 
       if (read_ADC(&h2) == HAL_OK) {
-        transmit_h2_sensor_values(&hcan, &h2);
+        if (transmit_h2_sensor_values(&hcan, &h2) != HAL_OK) {
+          LOG_ERROR("H2 CAN send failed");
+        }
       }
 
       /* One soil sample per second: Soil_ReadAvg() would block for 5 s or more. After a failed read, soil is
@@ -216,7 +222,9 @@ int main(void)
       } else {
         Soil_Data soil;
         if (Soil_ReadAll(&huart1, &soil) == SOIL_OK) {
-          Soil_CAN_Transmit(&hcan, &soil);
+          if (Soil_CAN_Transmit(&hcan, &soil) != HAL_OK) {
+            LOG_ERROR("soil CAN send failed");
+          }
         } else {
           soil_skip = 9;
         }

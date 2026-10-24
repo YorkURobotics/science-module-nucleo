@@ -333,9 +333,12 @@ const char *Soil_StatusStr(Soil_Status status)
         default:            return "Unknown";
     }
 }
-void Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
+HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
 {
+    if (hcan == NULL || data == NULL) return HAL_ERROR;
+
     uint32_t bits;
+    HAL_StatusTypeDef status;
 
     /* ---- Temp/Humidity: 2 floats = 8 bytes ---- */
     uint8_t temphumid[8];
@@ -352,7 +355,8 @@ void Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     temphumid[6] = (uint8_t)((bits >> 16) & 0xFF);
     temphumid[7] = (uint8_t)((bits >> 24) & 0xFF);
 
-    CAN_TRANSMIT(hcan, CAN_TEMPHUMID_ID, temphumid, sizeof(temphumid));
+    status = CAN_TRANSMIT(hcan, CAN_TEMPHUMID_ID, temphumid, sizeof(temphumid));
+    if (status != HAL_OK) return status;
 
 
     /* ---- pH/Conductivity: uint16_t + float = 6 bytes ---- */
@@ -367,7 +371,8 @@ void Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     phcond[4] = (uint8_t)((bits >> 16) & 0xFF);
     phcond[5] = (uint8_t)((bits >> 24) & 0xFF);
 
-    CAN_TRANSMIT(hcan, CAN_PHCOND_ID, phcond, sizeof(phcond));
+    status = CAN_TRANSMIT(hcan, CAN_PHCOND_ID, phcond, sizeof(phcond));
+    if (status != HAL_OK) return status;
 
 
     /* ---- NPK: 3 uint16_t = 6 bytes ---- */
@@ -382,5 +387,5 @@ void Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     npk[4] = (uint8_t)(data->potassium & 0xFF);
     npk[5] = (uint8_t)((data->potassium >> 8) & 0xFF);
 
-    CAN_TRANSMIT(hcan, CAN_NPK_ID, npk, sizeof(npk));
+    return CAN_TRANSMIT(hcan, CAN_NPK_ID, npk, sizeof(npk));
 }

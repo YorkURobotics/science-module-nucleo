@@ -111,8 +111,11 @@ void Soil_FormatData(const Soil_Data *data, char *buf, uint16_t buflen);
  */
 const char *Soil_StatusStr(Soil_Status status);
 
-
-void Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data);
+/**
+ * @brief Send data as the three soil frames (temperature/humidity, pH/conductivity, NPK)
+ * @retval HAL_OK, or the status of the first send that failed (later frames are not sent)
+ */
+HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data);
 
 
 #ifdef __cplusplus
