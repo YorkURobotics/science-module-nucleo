@@ -214,7 +214,7 @@ int main(void)
       }
 
       /* One soil request per second. The reply arrives by interrupt and is collected below, so a slow
-         or missing sensor no longer delays the SGP30 read (sending the request takes about 27 ms). */
+         or missing sensor no longer delays the SGP30 read (sending the request takes about 17 ms). */
       Soil_StartReadAll(&huart1);
     }
 

@@ -145,13 +145,15 @@ Soil_Status Soil_StartReadAll(UART_HandleTypeDef *huart)
     msg[6] = crc & 0xFF;
     msg[7] = (crc >> 8) & 0xFF;
 
-    /* Flush stale RX data */
-    __HAL_UART_FLUSH_DRREGISTER(huart);
-
     if (HAL_UART_Transmit(huart, msg, sizeof(msg), TX_TIMEOUT) != HAL_OK)
         return SOIL_ERR_TX;
 
-    HAL_Delay(BUS_TURNAROUND);
+    /* Listen as soon as the request has been sent (HAL_UART_Transmit returns after the last stop bit),
+       so a fast reply cannot overrun the one-byte receive register before reception starts. First
+       discard anything received while sending, and its overrun or error flags, which would
+       otherwise end the new reception at once. */
+    __HAL_UART_FLUSH_DRREGISTER(huart);
+    __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_PEF);
 
     rx_done = 0;
     rx_failed = 0;
