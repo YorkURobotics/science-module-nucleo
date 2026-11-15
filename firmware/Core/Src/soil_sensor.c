@@ -131,6 +131,7 @@ Soil_Status Soil_ReadAll(UART_HandleTypeDef *huart, Soil_Data *data)
 /* Non-blocking Read All: the reply is received by HAL_UART_Receive_IT() into rx_buf */
 static uint8_t rx_buf[19];                        /* 3 header + 14 data + 2 CRC */
 static volatile uint8_t rx_done;                  /* set by HAL_UART_RxCpltCallback() */
+static volatile uint8_t rx_failed;                /* set by HAL_UART_ErrorCallback() */
 static UART_HandleTypeDef * volatile rx_huart;    /* NULL when no request is outstanding */
 static uint32_t rx_start;
 
@@ -153,6 +154,7 @@ Soil_Status Soil_StartReadAll(UART_HandleTypeDef *huart)
     HAL_Delay(BUS_TURNAROUND);
 
     rx_done = 0;
+    rx_failed = 0;
     rx_start = HAL_GetTick();
     rx_huart = huart;
     if (HAL_UART_Receive_IT(huart, rx_buf, sizeof(rx_buf)) != HAL_OK) {
@@ -167,6 +169,9 @@ Soil_Status Soil_PollReadAll(Soil_Data *data)
     if (data == NULL) return SOIL_ERR_RX;
     if (rx_huart == NULL) return SOIL_IDLE;
 
+    /* Read rx_failed before rx_done: an interrupt that completes the reply sets rx_done before it can
+       set rx_failed, so a complete reply is never taken for a failed one */
+    uint8_t failed = rx_failed;
     if (rx_done) {
         rx_huart = NULL;
         uint16_t recv_crc = ((uint16_t)rx_buf[sizeof(rx_buf) - 1] << 8) | rx_buf[sizeof(rx_buf) - 2];
@@ -175,8 +180,8 @@ Soil_Status Soil_PollReadAll(Soil_Data *data)
         return SOIL_OK;
     }
 
-    /* The HAL ends an interrupt reception early on an overrun (HAL_UART_IRQHandler) */
-    if (rx_huart->RxState == HAL_UART_STATE_READY) {
+    /* The HAL ended the reception early, on an overrun (HAL_UART_ErrorCallback below) */
+    if (failed) {
         rx_huart = NULL;
         return SOIL_ERR_RX;
     }
@@ -193,6 +198,14 @@ Soil_Status Soil_PollReadAll(Soil_Data *data)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == rx_huart) rx_done = 1;
+}
+
+/* Overrides the HAL's weak callback; runs in the UART interrupt on a receive error. An overrun ends the
+   reception (RxState is then READY); a noise, framing or parity error does not, and the CRC check
+   catches its effect on the reply. */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == rx_huart && huart->RxState == HAL_UART_STATE_READY) rx_failed = 1;
 }
 
 /**
