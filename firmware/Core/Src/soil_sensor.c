@@ -76,15 +76,10 @@ static Soil_Status SendRecv(UART_HandleTypeDef *huart,
  * Public functions
  * ------------------------------------------------------------------------- */
 
-/* Limit a reading to the sensor's measuring range [lo, hi] */
-static float clamp_f(float v, float lo, float hi)
+/* True if a reading is within the sensor's measuring range [lo, hi] */
+static bool in_range(float v, float lo, float hi)
 {
-    return (v < lo) ? lo : (v > hi) ? hi : v;
-}
-
-static uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi)
-{
-    return (v < lo) ? lo : (v > hi) ? hi : v;
+    return v >= lo && v <= hi;
 }
 
 /* Fill data from a Read All reply */
@@ -98,15 +93,6 @@ static void ParseReadAll(const uint8_t *resp, Soil_Data *data)
     data->nitrogen     =  (uint16_t)(resp[11] << 8) | resp[12];
     data->phosphorus   =  (uint16_t)(resp[13] << 8) | resp[14];
     data->potassium    =  (uint16_t)(resp[15] << 8) | resp[16];
-
-    /* Measuring ranges from the soil sensor manual (TH-EC-PH-NPK, p. 1) */
-    data->humidity     = clamp_f(data->humidity, 0.0f, 100.0f);         /* %RH   */
-    data->temperature  = clamp_f(data->temperature, -40.0f, 80.0f);     /* deg C */
-    data->conductivity = clamp_u16(data->conductivity, 0, 20000);       /* uS/cm */
-    data->ph           = clamp_f(data->ph, 3.0f, 9.0f);
-    data->nitrogen     = clamp_u16(data->nitrogen, 1, 2999);            /* mg/kg */
-    data->phosphorus   = clamp_u16(data->phosphorus, 1, 2999);          /* mg/kg */
-    data->potassium    = clamp_u16(data->potassium, 1, 2999);           /* mg/kg */
 }
 
 /**
@@ -429,6 +415,9 @@ HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     uint32_t bits;
     HAL_StatusTypeDef status;
 
+    /* A frame with a reading outside the sensor's measuring range (soil sensor manual, TH-EC-PH-NPK,
+       p. 1) is not sent, so ROS gets no reading rather than a wrong one; the other frames are still sent */
+
     /* ---- Temp/Humidity: 2 floats = 8 bytes ---- */
     uint8_t temphumid[8];
 
@@ -444,8 +433,13 @@ HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     temphumid[6] = (uint8_t)((bits >> 16) & 0xFF);
     temphumid[7] = (uint8_t)((bits >> 24) & 0xFF);
 
-    status = CAN_TRANSMIT(hcan, CAN_TEMPHUMID_ID, temphumid, sizeof(temphumid));
-    if (status != HAL_OK) return status;
+    if (in_range(data->humidity, 0.0f, 100.0f)                /* %RH   */
+        && in_range(data->temperature, -40.0f, 80.0f)) {      /* deg C */
+        status = CAN_TRANSMIT(hcan, CAN_TEMPHUMID_ID, temphumid, sizeof(temphumid));
+        if (status != HAL_OK) return status;
+    } else {
+        LOG_WARNING("soil temperature/humidity out of range, frame not sent");
+    }
 
 
     /* ---- pH/Conductivity: uint16_t + float = 6 bytes ---- */
@@ -460,8 +454,13 @@ HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     phcond[4] = (uint8_t)((bits >> 16) & 0xFF);
     phcond[5] = (uint8_t)((bits >> 24) & 0xFF);
 
-    status = CAN_TRANSMIT(hcan, CAN_PHCOND_ID, phcond, sizeof(phcond));
-    if (status != HAL_OK) return status;
+    if (in_range(data->conductivity, 0.0f, 20000.0f)          /* uS/cm */
+        && in_range(data->ph, 3.0f, 9.0f)) {
+        status = CAN_TRANSMIT(hcan, CAN_PHCOND_ID, phcond, sizeof(phcond));
+        if (status != HAL_OK) return status;
+    } else {
+        LOG_WARNING("soil pH/conductivity out of range, frame not sent");
+    }
 
 
     /* ---- NPK: 3 uint16_t = 6 bytes ---- */
@@ -476,5 +475,13 @@ HAL_StatusTypeDef Soil_CAN_Transmit(CAN_HandleTypeDef *hcan, Soil_Data *data)
     npk[4] = (uint8_t)(data->potassium & 0xFF);
     npk[5] = (uint8_t)((data->potassium >> 8) & 0xFF);
 
-    return CAN_TRANSMIT(hcan, CAN_NPK_ID, npk, sizeof(npk));
+    if (in_range(data->nitrogen, 1.0f, 2999.0f)               /* mg/kg */
+        && in_range(data->phosphorus, 1.0f, 2999.0f)
+        && in_range(data->potassium, 1.0f, 2999.0f)) {
+        status = CAN_TRANSMIT(hcan, CAN_NPK_ID, npk, sizeof(npk));
+        if (status != HAL_OK) return status;
+    } else {
+        LOG_WARNING("soil NPK out of range, frame not sent");
+    }
+    return HAL_OK;
 }
